@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.DS_Store
+.venv/
+venv/
+.env
+
+# optional local artifacts (don’t push large files)
+artifacts/
+checkpoints/
+*.pt
+*.pth
+
+# data (don’t push dataset)
+data/
+dataset/
