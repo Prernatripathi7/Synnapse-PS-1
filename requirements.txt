@@ -1,0 +1,10 @@
+torch
+torchvision
+numpy
+faiss-cpu
+tqdm
+matplotlib
+pillow
+fastapi
+uvicorn
+python-multipart
