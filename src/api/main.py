@@ -1,7 +1,8 @@
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-import os, io
+
+import io
 import numpy as np
 import torch
 from PIL import Image
@@ -11,10 +12,12 @@ from feature_extraction import ImageEncoder
 from similarity_scoring_and_retrieval.retriever import FaissRetriever
 from build_model import build_model
 
+
 app = FastAPI(title="Synnapse Retrieval API")
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
+# File paths (Render will use these)
 CKPT_PATH = os.getenv("CKPT_PATH", "checkpoints/best_model.pt")
 EMB_PATH  = os.getenv("EMB_PATH",  "features/gallery_embeddings.npy")
 IDS_PATH  = os.getenv("IDS_PATH",  "features/gallery_item_ids.npy")
@@ -27,14 +30,16 @@ gallery_refs = None
 
 def pil_to_tensor_rgb(pil_img, size=224):
     pil_img = pil_img.convert("RGB").resize((size, size))
-    arr = np.asarray(pil_img).astype("float32") / 255.0  # HWC in [0,1]
-    chw = np.transpose(arr, (2, 0, 1))                   # CHW
+    arr = np.asarray(pil_img).astype("float32") / 255.0
+    chw = np.transpose(arr, (2, 0, 1))
     return torch.from_numpy(chw)
 
 
 @app.on_event("startup")
 def startup():
     global encoder, retriever, gallery_refs
+
+    print("🚀 Loading model and FAISS index...")
 
     model = build_model()
     encoder = ImageEncoder(model=model, ckpt_path=CKPT_PATH, device=DEVICE, normalize=True)
@@ -51,11 +56,12 @@ def startup():
 @app.post("/search")
 @torch.no_grad()
 def search(file: UploadFile = File(...), k: int = Query(5, ge=1, le=50)):
+
     img_bytes = file.file.read()
     pil = Image.open(io.BytesIO(img_bytes))
 
-    x = pil_to_tensor_rgb(pil)  # [C,H,W]
-    emb = encoder.encode_batch(x.unsqueeze(0).to(DEVICE)).numpy()[0]  # [D]
+    x = pil_to_tensor_rgb(pil)
+    emb = encoder.encode_batch(x.unsqueeze(0).to(DEVICE)).numpy()[0]
 
     top_ids, scores, idxs = retriever.search(emb, k=k)
 
@@ -64,6 +70,7 @@ def search(file: UploadFile = File(...), k: int = Query(5, ge=1, le=50)):
         ref = None
         if gallery_refs is not None and int(row_idx) < len(gallery_refs):
             ref = gallery_refs[int(row_idx)]
+
         results.append({
             "rank": rank,
             "item_id": str(iid),
