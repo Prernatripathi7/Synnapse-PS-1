@@ -1,5 +1,37 @@
+# src/feature_extraction/encoder.py
 import torch
 import torch.nn.functional as F
+
+def _clean_state_dict(sd):
+    # remove "module." prefix if saved with DataParallel
+    cleaned = {}
+    for k, v in sd.items():
+        if k.startswith("module."):
+            cleaned[k[len("module."):]] = v
+        else:
+            cleaned[k] = v
+    return cleaned
+
+def _filter_mismatched_keys(model, state_dict):
+    """
+    Remove keys whose tensor shapes don't match model's current shapes.
+    This prevents crashes when classifier head size differs.
+    """
+    model_sd = model.state_dict()
+    filtered = {}
+    dropped = []
+
+    for k, v in state_dict.items():
+        if k not in model_sd:
+            dropped.append((k, "missing_in_model"))
+            continue
+        if hasattr(v, "shape") and hasattr(model_sd[k], "shape"):
+            if tuple(v.shape) != tuple(model_sd[k].shape):
+                dropped.append((k, f"shape {tuple(v.shape)} != {tuple(model_sd[k].shape)}"))
+                continue
+        filtered[k] = v
+
+    return filtered, dropped
 
 class ImageEncoder:
     def __init__(self, model, ckpt_path, device, normalize=True):
@@ -7,16 +39,33 @@ class ImageEncoder:
         self.device = device
         self.normalize = normalize
 
-        checkpoint = torch.load(ckpt_path, map_location=device)
-        self.model.load_state_dict(checkpoint["model_state_dict"])
+        ckpt = torch.load(ckpt_path, map_location=device)
+
+        # your notebook saves {"model_state_dict": ...}
+        if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
+            state_dict = ckpt["model_state_dict"]
+        # sometimes people save raw state_dict directly
+        elif isinstance(ckpt, dict) and all(isinstance(k, str) for k in ckpt.keys()):
+            state_dict = ckpt
+        else:
+            raise ValueError("Unknown checkpoint format. Expected dict or dict with 'model_state_dict'.")
+
+        state_dict = _clean_state_dict(state_dict)
+        state_dict, dropped = _filter_mismatched_keys(self.model, state_dict)
+
+        missing, unexpected = self.model.load_state_dict(state_dict, strict=False)
+
+        if dropped:
+            print(f"[encoder] Dropped {len(dropped)} keys due to mismatch (OK for retrieval). Example:", dropped[:3])
+        if missing:
+            print(f"[encoder] Missing keys (OK if classifier differs): {len(missing)}")
+        if unexpected:
+            print(f"[encoder] Unexpected keys: {len(unexpected)}")
+
         self.model.eval()
 
     @torch.no_grad()
     def encode_batch(self, imgs):
-        """
-        imgs: tensor [B, C, H, W]
-        returns: embeddings [B, D] on CPU
-        """
         imgs = imgs.to(self.device)
 
         output = self.model(imgs)
