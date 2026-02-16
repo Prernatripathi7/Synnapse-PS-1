@@ -11,63 +11,58 @@ from similarity_scoring_and_retrieval.retriever import FaissRetriever
 def _extract_sample(sample):
     """
     Supports:
-      - dict: {"image":..., "item_id":..., optional "index"/"idx"/"path"/"img_path"/"image_path"}
-      - tuple/list: (image, item_id, optional ref)
-    Returns: (image_tensor_CHW, item_id, ref_or_None)
+      - dict: {"image":..., "item_id":..., optional "path"/"img_path"/"image_path"}
+      - tuple/list: (image, item_id, optional path)
+    Returns: (image_tensor_CHW, item_id, path_or_None)
     """
     if isinstance(sample, dict):
         img = sample["image"]
         item_id = sample["item_id"]
-        ref = sample.get("index", sample.get("idx", None))
-        if ref is None:
-            ref = sample.get("path", sample.get("img_path", sample.get("image_path", None)))
-        return img, item_id, ref
+        path = sample.get("path", sample.get("img_path", sample.get("image_path", None)))
+        return img, item_id, path
 
-    # tuple/list
     img = sample[0]
     item_id = sample[1]
-    ref = sample[2] if len(sample) >= 3 else None
-    return img, item_id, ref
+    path = sample[2] if len(sample) >= 3 else None
+    return img, item_id, path
 
 
 def _to_hwc_tensor(img_chw, mean=None, std=None):
     x = img_chw.detach().cpu().float()
-
-    # optional unnormalize for display
     if mean is not None and std is not None:
         mean_t = torch.tensor(mean).view(-1, 1, 1)
         std_t = torch.tensor(std).view(-1, 1, 1)
         x = x * std_t + mean_t
-
     if x.shape[0] == 1:
         x = x.repeat(3, 1, 1)
-
     x = x.clamp(0, 1)
     return x.permute(1, 2, 0).numpy()
 
 
-def _load_image_from_ref(dataset, ref, mean=None, std=None):
+def _load_image_from_path(path):
+    im = Image.open(path).convert("RGB")
+    return np.asarray(im)
+
+
+def _get_query_path(dataset, query_index, q_path_from_sample=None):
     """
-    ref can be:
-      - int : dataset index
-      - str : path to image file
-      - None: cannot display reliably
-    Returns displayable HWC numpy image.
+    We MUST match the exact path string format saved in gallery_refs.npy.
+    Priority:
+      1) path returned by dataset[query_index] (best)
+      2) dataset.df.iloc[query_index]["image"] if available
     """
-    if ref is None:
-        return None
+    if isinstance(q_path_from_sample, str) and len(q_path_from_sample) > 0:
+        return q_path_from_sample
 
-    # dataset index
-    if isinstance(ref, (int, np.integer)):
-        img, _, _ = _extract_sample(dataset[int(ref)])
-        return _to_hwc_tensor(img, mean=mean, std=std)
+    if hasattr(dataset, "df"):
+        df = dataset.df
+        if "image" in df.columns:
+            return str(df.iloc[int(query_index)]["image"])
 
-    # path
-    if isinstance(ref, str):
-        im = Image.open(ref).convert("RGB")
-        return np.asarray(im)
-
-    return None
+    raise ValueError(
+        "Could not determine query path. Make sure dataset[query_index] returns (img, id, path) "
+        "or dataset has .df with column 'image'."
+    )
 
 
 @torch.no_grad()
@@ -84,15 +79,8 @@ def run_retrieval_demo(
     output_path="sample_output/sample_retrieval.png",
     mean=None,
     std=None,
-    extra_neighbors=200,   # how many extra candidates to pull before filtering
+    extra_neighbors=300,   # pull extra, then filter
 ):
-    """
-    Produces sample retrieval output:
-      - Query image
-      - Top-K retrieved images
-      - Correct instances highlighted (green)
-      - ✅ Excludes the query image itself (same ref/path) from retrieval results
-    """
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     # Load encoder (best model)
@@ -102,64 +90,55 @@ def run_retrieval_demo(
     # Load retriever
     retriever = FaissRetriever(emb_path, ids_path, normalize=True)
 
-    # Load refs (mapping from embedding row -> dataset index OR file path)
+    # Load refs (embedding row -> image path)
     gallery_refs = np.load(refs_path, allow_pickle=True)
+    assert isinstance(gallery_refs[0], str), "Expected gallery_refs to be paths (strings)."
 
-    # Query sample
-    q_sample = dataset[query_index]
-    q_img, q_id, q_ref = _extract_sample(q_sample)
+    # Query
+    q_sample = dataset[int(query_index)]
+    q_img, q_id, q_path_from_sample = _extract_sample(q_sample)
 
-    # Decide what we will use to exclude self:
-    # Prefer explicit ref from dataset item; else fallback to query_index
-    query_ref = q_ref if q_ref is not None else query_index
+    query_path = _get_query_path(dataset, query_index, q_path_from_sample)
 
     # Encode query
     q_emb = encoder.encode_batch(q_img.unsqueeze(0).to(device))
     q_emb = q_emb.numpy().astype("float32")[0]
 
-    # --- Retrieve MORE than k, then filter out self ---
-    # IMPORTANT: this requires your FaissRetriever.search supports extra neighbors.
-    # If your retriever.search does NOT have 'extra', we will call it with (k + extra_neighbors)
-    try:
-        top_ids_all, scores_all, idxs_all = retriever.search(q_emb, k=k, extra=extra_neighbors)
-    except TypeError:
-        top_ids_all, scores_all, idxs_all = retriever.search(q_emb, k=k + extra_neighbors)
+    # Search more than k
+    # (your current retriever.search does NOT filter self, so we will)
+    top_ids_all, scores_all, idxs_all = retriever.search(q_emb, k=k + extra_neighbors)
 
+    # Filter out exact same path
     filtered = []
     for tid, sc, row in zip(top_ids_all, scores_all, idxs_all):
         row = int(row)
-        ref = gallery_refs[row] if row < len(gallery_refs) else None
-
-        # ✅ exclude exact same image ref/path/index
-        if ref == query_ref:
-            continue
-
+        ref_path = gallery_refs[row]
+        if ref_path == query_path:
+            continue  # ✅ exclude same exact image file
         filtered.append((tid, float(sc), row))
         if len(filtered) == k:
             break
 
     if len(filtered) < k:
-        print(f"⚠️ Only found {len(filtered)} results after excluding self. "
-              f"Increase extra_neighbors (currently {extra_neighbors}).")
+        print(f"⚠️ Only got {len(filtered)} results after excluding self. "
+              f"Try increasing extra_neighbors (now {extra_neighbors}).")
 
     top_ids = np.array([x[0] for x in filtered], dtype=object)
     scores = np.array([x[1] for x in filtered], dtype=float)
     idxs = np.array([x[2] for x in filtered], dtype=int)
 
-    print("Query index:", query_index, "Query ID:", q_id, "Query ref used for exclusion:", query_ref)
+    print("Query index:", query_index, "Query ID:", q_id)
+    print("Query path:", query_path)
     print("Top IDs (self-excluded):", top_ids)
     print("Scores:", scores)
     print("FAISS row idxs:", idxs)
+    print("Retrieved paths:", [gallery_refs[i] for i in idxs])
 
     # Display query
     query_disp = _to_hwc_tensor(q_img, mean=mean, std=std)
 
-    # Display retrieved using refs
-    retrieved_disp = []
-    for row_idx in idxs:
-        ref = gallery_refs[int(row_idx)] if int(row_idx) < len(gallery_refs) else None
-        img_disp = _load_image_from_ref(dataset, ref, mean=mean, std=std)
-        retrieved_disp.append(img_disp)
+    # Display retrieved (paths)
+    retrieved_disp = [_load_image_from_path(gallery_refs[int(r)]) for r in idxs]
 
     # Plot
     plt.figure(figsize=(3 * (len(idxs) + 1), 4))
@@ -171,14 +150,9 @@ def run_retrieval_demo(
 
     for i in range(len(idxs)):
         plt.subplot(1, len(idxs) + 1, i + 2)
-
-        if retrieved_disp[i] is None:
-            plt.text(0.5, 0.5, "No ref\n(saved)", ha="center", va="center")
-        else:
-            plt.imshow(retrieved_disp[i])
+        plt.imshow(retrieved_disp[i])
 
         is_correct = (top_ids[i] == q_id)
-
         ax = plt.gca()
         for spine in ax.spines.values():
             spine.set_linewidth(4)
