@@ -29,7 +29,7 @@ class FaissRetriever:
         if self.normalize:
             faiss.normalize_L2(q_emb)
 
-       search_k = min(self.emb.shape[0], k + extra)
-       scores, idxs = self.index.search(q_emb, search_k)
-       top_ids = self.ids[idxs[0]]
-       return top_ids, scores[0], idxs[0]
+        search_k = min(self.emb.shape[0], k + extra)
+        scores, idxs = self.index.search(q_emb, search_k)
+        top_ids = self.ids[idxs[0]]
+        return top_ids, scores[0], idxs[0]
