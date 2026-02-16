@@ -18,7 +18,7 @@ app = FastAPI(title="Synnapse Retrieval API")
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # File paths (Render will use these)
-CKPT_PATH = os.getenv("CKPT_PATH", "checkpoints/best_model.pt")
+CKPT_PATH = os.getenv("CKPT_PATH", "/content/drive/MyDrive/syNNapse_Inventory_ReID/models/reid_model3_best.pth")
 EMB_PATH  = os.getenv("EMB_PATH",  "features/gallery_embeddings.npy")
 IDS_PATH  = os.getenv("IDS_PATH",  "features/gallery_item_ids.npy")
 REFS_PATH = os.getenv("REFS_PATH", "features/gallery_refs.npy")
