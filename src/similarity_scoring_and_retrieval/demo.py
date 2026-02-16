@@ -9,10 +9,25 @@ from similarity_scoring_and_retrieval.retriever import FaissRetriever
 
 
 def _extract_sample(sample):
-    # dataset item supports dict or tuple/list
+    """
+    Supports:
+      - dict: {"image":..., "item_id":..., optional "index"/"idx"/"path"/"img_path"/"image_path"}
+      - tuple/list: (image, item_id, optional ref)
+    Returns: (image_tensor_CHW, item_id, ref_or_None)
+    """
     if isinstance(sample, dict):
-        return sample["image"], sample["item_id"]
-    return sample[0], sample[1]
+        img = sample["image"]
+        item_id = sample["item_id"]
+        ref = sample.get("index", sample.get("idx", None))
+        if ref is None:
+            ref = sample.get("path", sample.get("img_path", sample.get("image_path", None)))
+        return img, item_id, ref
+
+    # tuple/list
+    img = sample[0]
+    item_id = sample[1]
+    ref = sample[2] if len(sample) >= 3 else None
+    return img, item_id, ref
 
 
 def _to_hwc_tensor(img_chw, mean=None, std=None):
@@ -44,7 +59,7 @@ def _load_image_from_ref(dataset, ref, mean=None, std=None):
 
     # dataset index
     if isinstance(ref, (int, np.integer)):
-        img, _ = _extract_sample(dataset[int(ref)])
+        img, _, _ = _extract_sample(dataset[int(ref)])
         return _to_hwc_tensor(img, mean=mean, std=std)
 
     # path
@@ -52,7 +67,6 @@ def _load_image_from_ref(dataset, ref, mean=None, std=None):
         im = Image.open(ref).convert("RGB")
         return np.asarray(im)
 
-    # unknown type
     return None
 
 
@@ -70,12 +84,14 @@ def run_retrieval_demo(
     output_path="sample_output/sample_retrieval.png",
     mean=None,
     std=None,
+    extra_neighbors=200,   # how many extra candidates to pull before filtering
 ):
     """
     Produces sample retrieval output:
       - Query image
       - Top-K retrieved images
       - Correct instances highlighted (green)
+      - ✅ Excludes the query image itself (same ref/path) from retrieval results
     """
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
@@ -89,17 +105,49 @@ def run_retrieval_demo(
     # Load refs (mapping from embedding row -> dataset index OR file path)
     gallery_refs = np.load(refs_path, allow_pickle=True)
 
-    # Query
+    # Query sample
     q_sample = dataset[query_index]
-    q_img, q_id = _extract_sample(q_sample)
+    q_img, q_id, q_ref = _extract_sample(q_sample)
 
+    # Decide what we will use to exclude self:
+    # Prefer explicit ref from dataset item; else fallback to query_index
+    query_ref = q_ref if q_ref is not None else query_index
+
+    # Encode query
     q_emb = encoder.encode_batch(q_img.unsqueeze(0).to(device))
     q_emb = q_emb.numpy().astype("float32")[0]
 
-    top_ids, scores, idxs = retriever.search(q_emb, k=k)
+    # --- Retrieve MORE than k, then filter out self ---
+    # IMPORTANT: this requires your FaissRetriever.search supports extra neighbors.
+    # If your retriever.search does NOT have 'extra', we will call it with (k + extra_neighbors)
+    try:
+        top_ids_all, scores_all, idxs_all = retriever.search(q_emb, k=k, extra=extra_neighbors)
+    except TypeError:
+        top_ids_all, scores_all, idxs_all = retriever.search(q_emb, k=k + extra_neighbors)
 
-    print("Query index:", query_index, "Query ID:", q_id)
-    print("Top IDs:", top_ids)
+    filtered = []
+    for tid, sc, row in zip(top_ids_all, scores_all, idxs_all):
+        row = int(row)
+        ref = gallery_refs[row] if row < len(gallery_refs) else None
+
+        # ✅ exclude exact same image ref/path/index
+        if ref == query_ref:
+            continue
+
+        filtered.append((tid, float(sc), row))
+        if len(filtered) == k:
+            break
+
+    if len(filtered) < k:
+        print(f"⚠️ Only found {len(filtered)} results after excluding self. "
+              f"Increase extra_neighbors (currently {extra_neighbors}).")
+
+    top_ids = np.array([x[0] for x in filtered], dtype=object)
+    scores = np.array([x[1] for x in filtered], dtype=float)
+    idxs = np.array([x[2] for x in filtered], dtype=int)
+
+    print("Query index:", query_index, "Query ID:", q_id, "Query ref used for exclusion:", query_ref)
+    print("Top IDs (self-excluded):", top_ids)
     print("Scores:", scores)
     print("FAISS row idxs:", idxs)
 
@@ -114,15 +162,15 @@ def run_retrieval_demo(
         retrieved_disp.append(img_disp)
 
     # Plot
-    plt.figure(figsize=(3 * (k + 1), 4))
+    plt.figure(figsize=(3 * (len(idxs) + 1), 4))
 
-    plt.subplot(1, k + 1, 1)
+    plt.subplot(1, len(idxs) + 1, 1)
     plt.imshow(query_disp)
     plt.title(f"Query\nID={q_id}")
     plt.axis("off")
 
-    for i in range(k):
-        plt.subplot(1, k + 1, i + 2)
+    for i in range(len(idxs)):
+        plt.subplot(1, len(idxs) + 1, i + 2)
 
         if retrieved_disp[i] is None:
             plt.text(0.5, 0.5, "No ref\n(saved)", ha="center", va="center")

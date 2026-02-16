@@ -21,7 +21,7 @@ class FaissRetriever:
         self.index = faiss.IndexFlatIP(D)
         self.index.add(self.emb)
 
-    def search(self, q_emb, k=5):
+    def search(self, q_emb, k=5, extra=50):
         q_emb = np.asarray(q_emb, dtype="float32")
         if q_emb.ndim == 1:
             q_emb = q_emb[None, :]
@@ -29,6 +29,7 @@ class FaissRetriever:
         if self.normalize:
             faiss.normalize_L2(q_emb)
 
-        scores, idxs = self.index.search(q_emb, k)
-        top_ids = self.ids[idxs[0]]
-        return top_ids, scores[0], idxs[0]
+       search_k = min(self.emb.shape[0], k + extra)
+       scores, idxs = self.index.search(q_emb, search_k)
+       top_ids = self.ids[idxs[0]]
+       return top_ids, scores[0], idxs[0]
