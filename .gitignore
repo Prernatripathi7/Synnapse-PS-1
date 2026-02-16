@@ -17,3 +17,5 @@ data/
 dataset/
 features/
 *.npy
+features/
+*.npy
