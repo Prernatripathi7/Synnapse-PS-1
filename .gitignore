@@ -15,3 +15,5 @@ checkpoints/
 # data (don’t push dataset)
 data/
 dataset/
+features/
+*.npy
