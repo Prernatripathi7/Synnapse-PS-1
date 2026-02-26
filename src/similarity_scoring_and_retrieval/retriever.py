@@ -1,11 +1,7 @@
-# src/similarity_scoring_and_retrieval/retriever.py
 import numpy as np
 import faiss
 
 class FaissRetriever:
-    """
-    Cosine similarity retrieval using FAISS (IndexFlatIP with L2-normalized vectors).
-    """
     def __init__(self, emb_path, ids_path, normalize=True):
         self.emb = np.load(emb_path).astype("float32")
         self.ids = np.load(ids_path, allow_pickle=True)
