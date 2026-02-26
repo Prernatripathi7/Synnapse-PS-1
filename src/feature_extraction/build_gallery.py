@@ -2,7 +2,7 @@ import os
 import numpy as np
 import torch
 from tqdm import tqdm
-from feature_extraction import ImageEncoder
+from src.feature_extraction import ImageEncoder
 def _extract_from_batch(batch):
     if isinstance(batch, dict):
         imgs = batch.get("image", batch.get("images"))

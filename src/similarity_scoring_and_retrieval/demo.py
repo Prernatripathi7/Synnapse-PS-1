@@ -3,8 +3,8 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 from PIL import Image
-from feature_extraction import ImageEncoder
-from similarity_scoring_and_retrieval.retriever import FaissRetriever
+from src.feature_extraction import ImageEncoder
+from src.similarity_scoring_and_retrieval.retriever import FaissRetriever
 def _extract_sample(sample):
     if isinstance(sample, dict):
         img = sample["image"]
