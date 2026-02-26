@@ -1,9 +1,6 @@
-# src/feature_extraction/encoder.py
 import torch
 import torch.nn.functional as F
-
 def _clean_state_dict(sd):
-    # remove "module." prefix if saved with DataParallel
     cleaned = {}
     for k, v in sd.items():
         if k.startswith("module."):
@@ -13,10 +10,6 @@ def _clean_state_dict(sd):
     return cleaned
 
 def _filter_mismatched_keys(model, state_dict):
-    """
-    Remove keys whose tensor shapes don't match model's current shapes.
-    This prevents crashes when classifier head size differs.
-    """
     model_sd = model.state_dict()
     filtered = {}
     dropped = []
@@ -40,11 +33,8 @@ class ImageEncoder:
         self.normalize = normalize
 
         ckpt = torch.load(ckpt_path, map_location=device)
-
-        # your notebook saves {"model_state_dict": ...}
         if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
             state_dict = ckpt["model_state_dict"]
-        # sometimes people save raw state_dict directly
         elif isinstance(ckpt, dict) and all(isinstance(k, str) for k in ckpt.keys()):
             state_dict = ckpt
         else:
@@ -67,11 +57,8 @@ class ImageEncoder:
     @torch.no_grad()
     def encode_batch(self, imgs):
         imgs = imgs.to(self.device)
-
         output = self.model(imgs)
         emb = output[0] if isinstance(output, (tuple, list)) else output
-
         if self.normalize:
             emb = F.normalize(emb, p=2, dim=1)
-
         return emb.detach().cpu()
