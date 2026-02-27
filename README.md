@@ -84,7 +84,7 @@ We train the model using a **joint objective**:
    - Acts as a stabilizer/regularizer and improves discriminative learning
    
 The overall optimization objective is:
-`L_total = L_triplet + λ * L_CE`
+`$$L_{total} = L_{triplet} + \lambda L_{CE}$$`
 Where:
 - `L_triplet` enforces embedding separation
 - `L_CE` is the classification loss
