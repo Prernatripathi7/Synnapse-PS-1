@@ -1,10 +1,10 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 def load_dinov2_backbone(variant="dinov2_vits14", device=None):
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
     backbone = torch.hub.load("facebookresearch/dinov2", variant)
     backbone.eval()
     backbone.to(device)
@@ -25,14 +25,10 @@ class DINOv2Embedder(nn.Module):
         logits = self.classifier(emb)
         return emb, logits
 
-def build_model(
-    variant="dinov2_vits14",
-    emb_dim=512,
-    num_classes=1,
-    device=None
-):
+def build_model(variant="dinov2_vits14", emb_dim=512, num_classes=1, device=None):
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     backbone = load_dinov2_backbone(variant=variant, device=device)
-    model = DINOv2Embedder(backbone, num_classes=num_classes, emb_dim=emb_dim)
-    return model.to(device)
+    model = DINOv2Embedder(backbone, num_classes=num_classes, emb_dim=emb_dim).to(device)
+    model.eval()
+    return model
