@@ -500,3 +500,31 @@ Each result includes:
 - `score` (cosine similarity)
 - `ref` (gallery image path)
 ### Screenshots of API  request and response
+
+
+##  Cloud Deployment & Infrastructure Analysis (Render)
+
+As a final step to test our pipeline in a real-world scenario, we attempted to deploy the FastAPI backend to Render's free tier. Our goal was to see how the application behaves in a live, public-facing environment. 
+
+While the deployment proved that our code and API routing were correct, it also highlighted the heavy hardware requirements of running deep learning models. 
+
+### What Worked: Successful Build and Routing
+The deployment process itself was a success. Render was able to install all our dependencies from `requirements.txt`, launch the Uvicorn server, and set the service live at our `.onrender.com` URL in a few minutes.
+
+<img width="1600" height="598" alt="image" src="https://github.com/user-attachments/assets/249cb610-41e1-4245-b618-f559de0a2619" />
+
+
+We verified the API routing through the server logs. The diagnostic endpoints, including `GET /docs`, `GET /openapi.json`, and `GET /health`, all successfully returned HTTP `200 OK` status codes. As expected, navigating to the root URL (`/`) or `/favicon.ico` returned a `404 Not Found`, since we intentionally only defined the `/health` and `/search` routes for this API.
+
+### The Challenge: Hardware Limits and Memory Crashes (OOM)
+The main issue occurred when the application actually tried to run the deep learning components. The service triggered an automatic restart because it exceeded its allocated memory limit.
+
+Render's free tier limits instances to just 512 MB of RAM. Our backend is designed to "lazy load" the DINOv2 model and the FAISS database into memory when the first `/search` request hits. Loading these heavy PyTorch tensors and massive `.npy` files requires far more than 512 MB, which immediately caused an Out-Of-Memory (OOM) crash by the host server.
+
+Additionally, the free instance is designed to spin down after 15 minutes of inactivity. 
+
+Our logs showed the server repeatedly shutting down and then undergoing a "cold start." This spin-down behavior makes the memory issue even worse, as the server has to try and reload the massive model weights from scratch every time it wakes up.
+
+### Conclusion
+This deployment attempt was highly valuable. It proved that our codebase is production-ready and the API routing is fully functional. However, it also taught us that hosting a persistent vector database and a transformer model requires dedicated hardware. To make this API stable and always available, it would need to be hosted on a higher-tier instance with at least 4GB to 8GB of RAM to comfortably handle the PyTorch weights and FAISS index.
+
