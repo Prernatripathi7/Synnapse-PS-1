@@ -86,9 +86,9 @@ We train the model using a **joint objective**:
 The overall optimization objective is:
 $$L_{total} = L_{triplet} + \lambda L_{CE}$$
 Where:
-- `L_triplet` enforces embedding separation
-- `L_CE` is the classification loss
-- `λ` balances the two objectives
+* $L_{triplet}$ enforces embedding separation
+* $L_{CE}$ is the classification loss
+* $\lambda$ balances the two objectives
 ### 9) Why PK Sampler is Required (PK Batch Sampling)
 Metric learning requires **positives and negatives inside the same batch**.  
 A random batch can contain many item IDs with only one sample, making triplet formation weak or impossible.
