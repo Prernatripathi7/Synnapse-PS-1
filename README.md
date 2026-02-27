@@ -485,7 +485,11 @@ This modular design ensures:
 - Easy deployment and reproducibility
 
 ## Deployment
-This project provides a fully functional FastAPI deployment for large-scale visual retrieval.
+### Local Testing (Development)
+The API can be tested locally at:
+http://127.0.0.1:8000  (localhost)
+
+This is only for development and debugging purposes.
 ### Precomputed Gallery Embeddings
 The gallery contains ~60K images.  
 Computing embeddings during API startup would be slow and memory-intensive.
@@ -523,7 +527,10 @@ Each result includes:
 - `score` (cosine similarity)
 - `ref` (gallery image path)
 ### Screenshots of API  request and response
-
+#### Request
+![request](https://github.com/user-attachments/assets/ad2f5697-6d8d-441f-9c92-e510ddcdad07)
+#### Response
+![response](https://github.com/user-attachments/assets/5ba38d92-754c-4bee-aa2b-7c0237d2596b)
 
 ##  Cloud Deployment & Infrastructure Analysis (Render)
 
