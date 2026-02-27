@@ -4,8 +4,8 @@ import torch
 import matplotlib.pyplot as plt
 from PIL import Image
 
-from feature_extraction import ImageEncoder
-from similarity_scoring_and_retrieval.retriever import FaissRetriever
+from src.feature_extraction import ImageEncoder
+from src.similarity_scoring_and_retrieval.retriever import FaissRetriever
 
 
 def preprocess_pil(pil_img, size=224):
