@@ -405,6 +405,29 @@ features/gallery_embeddings.npy
 features/gallery_item_ids.npy
 features/gallery_refs.npy
 This creates a persistent embedding database for fast retrieval.
+#### Example: Generating Gallery Embeddings
+Run the following from the project root:
+```python
+import torch
+from src.build_model import build_model
+from src.feature_extraction.build_gallery import build_gallery_database
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+def model_ctor():
+    return build_model(
+        variant="dinov2_vits14",
+        emb_dim=512,
+        num_classes=1,
+        device=device
+    )
+gallery_emb, gallery_ids, gallery_refs = build_gallery_database(
+    model_ctor=model_ctor,
+    ckpt_path="models/reid_model3_best.pth",
+    gallery_loader=test_loader,
+    device=device,
+    out_dir="features",
+    normalize=True
+)
+```
 ### 7) Module B — Similarity Search (FAISS Retrieval)
 Implemented in:
 `src/similarity_scoring_and_retrieval/retriever.py`
