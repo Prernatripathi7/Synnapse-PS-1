@@ -488,7 +488,7 @@ When the API receives its first `/search` request:
 3. Loads the trained checkpoint
 4. Loads gallery embeddings into FAISS (cosine similarity)
 5. Becomes ready to serve requests
-Lazy initialization is used to avoid startup timeouts on cloud platforms.
+6. Lazy initialization is used to avoid startup timeouts on cloud platforms.
 ### Retrieval Flow
 1. User uploads **any image**
 2. Image is resized + normalized
