@@ -322,3 +322,181 @@ We now discuss as to why this approach was used.
 - **Pretrained backbones with progressive unfreezing** preserve learned visual knowledge while adapting to the inventory dataset.
 - **DINOv2** was selected as the final model because it provided the best open-set retrieval performance among the tested architectures.
 - **Cosine similarity with FAISS** enables accurate and scalable nearest-neighbor retrieval in the learned embedding space.
+## Complete Workflow For User (Detailed Step-by-Step)
+This section explains the entire system end-to-end, from setting up the repository to running similarity-based retrieval.
+### 1) Clone the Repository
+```bash
+git clone https://github.com/Prernatripathi7/Synnapse-PS-1.git
+cd Synnapse-PS-1
+```
+This downloads the complete project including:
+- Model reconstruction code (`src/build_model.py`)
+- Module A – Feature Extraction
+- Module B – Similarity & Retrieval
+- Checkpoint download script
+- Demo
+- API code
+### 2) Install Dependencies
+```bash
+pip install -r requirements.txt
+```
+This installs:
+- **PyTorch** → model execution  
+- **Torchvision** → transforms  
+- **FAISS (CPU)** → fast similarity search  
+- **Hugging Face Hub** → checkpoint download  
+- **NumPy, Pillow** → embedding storage + image loading  
+- **Matplotlib** → visualization  
+- **FastAPI & Uvicorn** → API deployment  
+### 3) Download the Trained Checkpoint (Hosted on Hugging Face)
+```bash
+python scripts/download_checkpoint.py
+```
+This script:
+- Connects to the Hugging Face repository  
+- Downloads `reid_model3_best.pth`  
+- Saves it locally at:
+```
+models/reid_model3_best.pth
+```
+#### Why is the checkpoint hosted on Hugging Face?
+The trained model weights are intentionally **not stored directly in the GitHub repository**. Instead, they are hosted on Hugging Face for the following reasons:
+- GitHub repositories have size limitations for large binary files.
+- Model checkpoints (.pth files) are typically hundreds of MBs.
+- Hugging Face is optimized for hosting and versioning ML artifacts.
+- It allows clean separation of **code (GitHub)** and **model weights (Hugging Face)**.
+- This ensures reproducibility and keeps the repository lightweight.
+At runtime, the checkpoint is dynamically downloaded and integrated into the system.
+### 4) Rebuild the Model Architecture
+The system reconstructs the inference architecture using:
+`src/build_model.py`
+Internally, this:
+- Loads **DINOv2 (dinov2_vits14)** backbone using `torch.hub`
+- Backbone feature dimension = **384**
+- Adds projection layer:
+  384 → 512 embedding dimension
+- Prepares classifier head (used during training, safely ignored during retrieval)
+- Returns inference-ready embedding model
+This guarantees architectural consistency with the trained checkpoint.
+### 5) Module A — Feature Extraction (Image → 512-d Embedding)
+Implemented in:
+`src/feature_extraction/encoder.py`
+When executed, Module A:
+1. Rebuilds the DINOv2-based model
+2. Loads checkpoint weights
+3. Cleans DataParallel prefixes (`"module."`)
+4. Ignores classifier mismatch keys (not needed for retrieval)
+5. Switches model to `eval()` mode
+6. Runs inference under `torch.no_grad()`
+7. Produces a **512-dimensional embedding vector**
+8. Applies **L2 normalization**
+Why L2 normalization?
+Because cosine similarity = inner product when vectors are normalized.  
+This enables efficient FAISS similarity search.
+### 6) Build the Gallery Embedding Database (One-Time Step)
+Before retrieval, gallery embeddings must be generated.
+This is handled by:
+`src/feature_extraction/build_gallery.py`
+It:
+- Iterates over all gallery images
+- Extracts 512-d normalized embeddings
+- Saves:
+features/gallery_embeddings.npy
+features/gallery_item_ids.npy
+features/gallery_refs.npy
+This creates a persistent embedding database for fast retrieval.
+### 7) Module B — Similarity Search (FAISS Retrieval)
+Implemented in:
+`src/similarity_scoring_and_retrieval/retriever.py`
+When a query is provided:
+1. Load gallery embeddings
+2. Build FAISS index:
+```python
+faiss.IndexFlatIP(512)
+```
+3. Since embeddings are L2 normalized:
+Inner Product = Cosine Similarity
+4. Perform Top-K nearest neighbor search
+5. Return:
+   - Retrieved indices
+   - Corresponding item IDs
+   - Similarity scores
+### 8) Run the Retrieval Demo (User-Level Execution)
+This demo supports **any query image** (it does NOT need to belong to the dataset).  
+The system will embed the query image using the trained DINOv2 model and retrieve the **Top-K most similar gallery images** using FAISS (cosine similarity via L2-normalized inner product).
+#### Example Usage (Any Input Image Path)
+```python
+import torch
+from src.build_model import build_model
+from src.similarity_scoring_and_retrieval.demo import run_retrieval_demo_any_image
+device = "cuda" if torch.cuda.is_available() else "cpu"
+def model_ctor():
+    return build_model(
+        variant="dinov2_vits14",
+        emb_dim=512,
+        num_classes=1,
+        device=device
+    )
+top_ids, scores, idxs = run_retrieval_demo_any_image(
+    model_ctor=model_ctor,
+    ckpt_path="models/reid_model3_best.pth",
+    query_image_path="path/to/any/query.jpg",  # <-- user can give ANY image here
+    k=5,
+    device=device,
+    emb_path="features/gallery_embeddings.npy",
+    ids_path="features/gallery_item_ids.npy",
+    refs_path="features/gallery_refs.npy",
+    output_path="sample_output/sample_retrieval.png",
+    extra=300
+)
+```
+## Final System Pipeline
+**User Flow:**
+Clone → Install Dependencies → Download Checkpoint → Rebuild Model → Build Gallery → Run Retrieval
+**System Flow:**
+Image → DINOv2 Backbone → 512-d Embedding → L2 Normalize → FAISS Cosine Search → Top-K Results → Visualization
+This modular design ensures:
+- Clean architecture reconstruction
+- Lightweight checkpoint management
+- Efficient large-scale similarity retrieval
+- Easy deployment and reproducibility
+
+## Deployment
+This project provides a fully functional FastAPI deployment for large-scale visual retrieval.
+### Precomputed Gallery Embeddings
+The gallery contains ~60K images.  
+Computing embeddings during API startup would be slow and memory-intensive.
+Therefore:
+- Gallery embeddings are **precomputed offline**
+- Stored as:
+  - `gallery_embeddings.npy` (N × 512)
+  - `gallery_item_ids.npy`
+  - `gallery_refs.npy`
+- Uploaded to a **Hugging Face Model Repository**
+- Not stored in GitHub (to keep repo lightweight)
+### Assets Hosted on Hugging Face
+The following files are hosted externally:
+- `models/reid_model3_best.pth` → Trained DINOv2 checkpoint
+- `features/gallery_embeddings.npy`
+- `features/gallery_item_ids.npy`
+- `features/gallery_refs.npy`
+During deployment, these are automatically downloaded if not present locally.
+###  Deployment Workflow
+When the API receives its first `/search` request:
+1. Downloads model + gallery assets from Hugging Face (if needed)
+2. Builds the DINOv2 model (`dinov2_vits14`)
+3. Loads the trained checkpoint
+4. Loads gallery embeddings into FAISS (cosine similarity)
+5. Becomes ready to serve requests
+Lazy initialization is used to avoid startup timeouts on cloud platforms.
+### Retrieval Flow
+1. User uploads **any image**
+2. Image is resized + normalized
+3. 512-D embedding is generated
+4. FAISS performs cosine similarity search
+5. Top-K similar gallery images are returned
+Each result includes:
+- `item_id`
+- `score` (cosine similarity)
+- `ref` (gallery image path)
+### Screenshots of API  request and response
