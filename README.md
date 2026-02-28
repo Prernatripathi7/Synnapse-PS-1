@@ -211,7 +211,7 @@ This ensures fair comparison between backbones.
 | Model        | Top-1 | Top-5 (Primary) | Top-10 |
 |-------------|-------|-----------------|--------|
 | ResNet50    | 67.28%   | 79.03%             | 82.64%    |
-| Swin        | 74.10%   | 84.56%             | 87.47%    |
+| Swin        | 73.82%   | 84.45%             | 87.42%    |
 | DINOv2      | 75.04%   | 85.73%             | 88.63%    |
 
 ### Final Model Selection
